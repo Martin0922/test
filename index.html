@@ -44,11 +44,7 @@ const grid=document.getElementById("grid"), stats=document.getElementById("stats
 const search=document.getElementById("search"), sort=document.getElementById("sort");
 const modal=document.getElementById("modal"), large=document.getElementById("large"), detailName=document.getElementById("detailName"), detailMeta=document.getElementById("detailMeta"), detailText=document.getElementById("detailText"), flip=document.getElementById("flip");
 let resolved=[], current=null, face=0;
-function imgFor(c,i=0){
- const face=c.card_faces?.[i];
- const uris=face?.image_uris || c.image_uris || {};
- return uris.normal || uris.large || uris.png || uris.small || "";
-}
+function imgFor(c,i=0){return c.image_uris?.normal || c.card_faces?.[i]?.image_uris?.normal || c.image_uris?.large || c.card_faces?.[i]?.image_uris?.large || ""}
 function faces(c){return c.card_faces?.length>1 ? c.card_faces : null}
 function identifiers(c){const id={name:c.name,set:c.set};if(c.collector)id.collector_number=c.collector;return id}
 async function load(){
@@ -65,51 +61,7 @@ async function load(){
    if(!c)c=found.find(x=>x.name.toLowerCase()===d.name.toLowerCase());
    return c?{...c,qty:d.qty,deckName:d.name,deckSet:d.set,missing:false}:{name:d.name,qty:d.qty,deckSet:d.set,missing:true};
  });
- // Resolve double-faced cards by the front-face name. Scryfall's named
- // endpoint is unreliable when the combined "Front // Back" name is supplied.
- // Validate both face names instead of requiring a particular combined-name string.
- for(let i=0;i<resolved.length;i++){
-  const d=deck[i];
-  if(!d.name.includes(" // ")) continue;
-  const [frontName,backName]=d.name.split(" // ").map(x=>x.trim());
-  const valid=c=>{
-   const f=c?.card_faces;
-   return Array.isArray(f) && f.length>1 &&
-    (f[0]?.name||"").toLowerCase()===frontName.toLowerCase() &&
-    (f[1]?.name||"").toLowerCase()===backName.toLowerCase();
-  };
-  try{
-   let c=null;
-   // First ask Scryfall for the front face; this returns the complete
-   // double-faced card object, including both faces' images and rules text.
-   let url="https://api.scryfall.com/cards/named?fuzzy="+encodeURIComponent(frontName);
-   let r=await fetch(url,{headers:{"Accept":"application/json"}});
-   if(r.ok){const candidate=await r.json();if(valid(candidate))c=candidate;}
-   // If fuzzy naming selected another printing/card, constrain by the deck's set.
-   if(!c){
-    const query='set:'+d.set+' name:"'+frontName+'"';
-    url="https://api.scryfall.com/cards/search?q="+encodeURIComponent(query);
-    r=await fetch(url,{headers:{"Accept":"application/json"}});
-    if(r.ok){
-     const results=await r.json();
-     c=(results.data||[]).find(valid)||null;
-    }
-   }
-   // Last fallback: search all sets for the exact front-face name.
-   if(!c){
-    const query='!"'+frontName+'"';
-    url="https://api.scryfall.com/cards/search?q="+encodeURIComponent(query);
-    r=await fetch(url,{headers:{"Accept":"application/json"}});
-    if(r.ok){
-     const results=await r.json();
-     c=(results.data||[]).find(valid)||null;
-    }
-   }
-   if(c)resolved[i]={...c,qty:d.qty,deckName:d.name,deckSet:d.set,missing:false};
-  }catch(err){ /* Keep the entry marked missing if Scryfall cannot be reached. */ }
- }
- const unresolved=resolved.filter(c=>c.missing).length;
- notice.textContent=unresolved?`${unresolved} card lookup(s) still need attention. Double-faced cards receive an additional exact-name lookup.`:"All requested card entries were matched. Double-faced cards can be flipped to view both faces.";
+ notice.textContent=missing.length?`${missing.length} printing lookup(s) need attention. Any unresolved cards are shown as placeholders below.`:"All requested card entries were matched to Scryfall printings.";
  render();
 }
 function render(){
@@ -129,12 +81,12 @@ function render(){
  if(!list.length)grid.innerHTML='<div class="notice">No cards match that search.</div>';
 }
 function openCard(c){
- current=c;face=0;const f=faces(c);large.src=imgFor(c,0);large.alt=c.card_faces?.[0]?.name||c.name;detailName.textContent=(c.card_faces?.[0]?.name||c.name)+(c.name===commander?" · COMMANDER":"");
- detailMeta.textContent=`${c.qty} ${c.qty===1?"copy":"copies"} · ${c.set_name||c.deckSet||""}${f?" · Front face":""}`;
- detailText.textContent=c.card_faces?.[0]?.oracle_text||c.oracle_text||"Card text is unavailable for this entry.";
- flip.hidden=!f;flip.textContent="Show other face";modal.showModal();
+ current=c;face=0;const f=faces(c);large.src=imgFor(c,0);large.alt=c.name;detailName.textContent=c.name+(c.name===commander?" · COMMANDER":"");
+ detailMeta.textContent=`${c.qty} ${c.qty===1?"copy":"copies"} · ${c.set_name||c.deckSet||""}`;
+ detailText.textContent=c.oracle_text||c.card_faces?.[0]?.oracle_text||"Card text is unavailable for this entry.";
+ flip.hidden=!f;modal.showModal();
 }
-flip.addEventListener("click",()=>{if(!current)return;face=1-face;const f=current.card_faces?.[face];large.src=imgFor(current,face);large.alt=f?.name||current.name;detailName.textContent=f?.name||current.name;detailMeta.textContent=`${current.qty} ${current.qty===1?"copy":"copies"} · ${current.set_name||current.deckSet||""} · ${face===0?"Front face":"Back face"}`;detailText.textContent=f?.oracle_text||current.oracle_text||"Rules text is unavailable for this face.";flip.textContent=face===0?"Show other face":"Show front face"});
+flip.addEventListener("click",()=>{if(!current)return;face=1-face;large.src=imgFor(current,face);detailText.textContent=current.card_faces?.[face]?.oracle_text||"";flip.textContent=face===0?"Show other face":"Show front face"});
 document.getElementById("close").addEventListener("click",()=>modal.close());
 search.addEventListener("input",render);sort.addEventListener("change",render);
 load().catch(e=>{stats.textContent="Could not load card data.";notice.textContent="Card lookup failed: "+e.message+". Check your connection and reload the page.";});
